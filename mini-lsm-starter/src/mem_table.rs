@@ -1,6 +1,5 @@
 #![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
 
-use std::iter::Skip;
 use std::ops::Bound;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -75,11 +74,9 @@ impl MemTable {
 
     /// Get a value by key.
     pub fn get(&self, _key: &[u8]) -> Option<Bytes> {
-        if let Some(kv) = self.map.get(&Bytes::copy_from_slice(_key)) {
-            Some(kv.value().clone())
-        } else {
-            None
-        }
+        self.map
+            .get(&Bytes::copy_from_slice(_key))
+            .map(|kv| kv.value().clone())
     }
 
     /// Put a key-value pair into the mem-table.
@@ -103,7 +100,15 @@ impl MemTable {
 
     /// Get an iterator over a range of keys.
     pub fn scan(&self, _lower: Bound<&[u8]>, _upper: Bound<&[u8]>) -> MemTableIterator {
-        unimplemented!()
+        let (_lower, _upper) = (map_bound(_lower), map_bound(_upper));
+        let mut itr = MemTableIteratorBuilder {
+            map: self.map.clone(),
+            iter_builder: |map| map.range((_lower, _upper)),
+            item: (Bytes::new(), Bytes::new()),
+        }
+        .build();
+        itr.next().unwrap();
+        itr
     }
 
     /// Flush the mem-table to SSTable. Implement in week 1 day 6.
@@ -149,18 +154,23 @@ impl StorageIterator for MemTableIterator {
     type KeyType<'a> = KeySlice<'a>;
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        &self.borrow_item().1[..]
     }
 
     fn key(&self) -> KeySlice {
-        unimplemented!()
+        KeySlice::from_slice(&self.borrow_item().0[..])
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        !self.borrow_item().0.is_empty()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        let entry = self.with_iter_mut(|iter| iter.next());
+        let next_item = entry
+            .map(|kv| (kv.key().clone(), kv.value().clone()))
+            .unwrap_or_else(|| (Bytes::new(), Bytes::new()));
+        self.with_mut(|itr| *itr.item = next_item);
+        Ok(())
     }
 }
