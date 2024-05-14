@@ -2,6 +2,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use crate::key::{KeySlice, KeyVec};
+use bytes::BufMut;
 
 use super::Block;
 
@@ -47,20 +48,10 @@ impl BlockBuilder {
     }
     fn add_kv(&mut self, key: &KeySlice, value: &[u8]) {
         self.offsets.push(self.data.len() as u16);
-        self.data
-            .extend(Self::write_little_endian(key.len() as u16));
-        self.data.extend(key.raw_ref());
-        self.data
-            .extend(Self::write_little_endian(value.len() as u16));
-        self.data.extend(value);
-    }
-    pub fn write_little_endian(data: u16) -> [u8; 2] {
-        let low = (data & 0xff) as u8;
-        let high = ((data >> 8) & 0xff) as u8;
-        [low, high]
-    }
-    pub fn read_little_endian(data: &[u8]) -> u16 {
-        (data[0]) as u16 | ((data[1] as u16) << 8)
+        self.data.put_u16(key.len() as u16);
+        self.data.put(key.raw_ref());
+        self.data.put_u16(value.len() as u16);
+        self.data.put(value);
     }
 
     /// Check if there is no key-value pair in the block.

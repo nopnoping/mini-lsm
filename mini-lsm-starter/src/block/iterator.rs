@@ -1,6 +1,9 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
+use bytes::Buf;
+use std::cmp::Ordering;
+use std::ptr::read;
 use std::sync::Arc;
 
 use crate::key::{KeySlice, KeyVec};
@@ -65,67 +68,51 @@ impl BlockIterator {
 
     /// Seeks to the first key in the block.
     pub fn seek_to_first(&mut self) {
-        let key_len = BlockBuilder::read_little_endian(&self.block.data[0..2]) as usize;
-        let key = KeyVec::from_vec(Vec::from(&self.block.data[2..2 + key_len]));
-        let value_len =
-            BlockBuilder::read_little_endian(&self.block.data[2 + key_len..4 + key_len]) as usize;
-
-        self.first_key = key.clone();
-        self.key = key;
-        self.idx = 0;
-        self.value_range = (4 + key_len, 4 + key_len + value_len);
+        self.seek_to(0);
+        self.first_key = self.key.clone();
     }
 
-    /// Move to the next key in the block.
-    pub fn next(&mut self) {
-        self.idx = self.idx + 1;
-        if self.idx >= self.block.offsets.len() {
-            self.key = KeyVec::new();
+    fn seek_to(&mut self, idx: usize) {
+        if idx >= self.block.offsets.len() {
+            self.key.clear();
             self.value_range = (0, 0);
             return;
         }
 
-        let key_start = self.block.offsets[self.idx] as usize;
-        let key_len =
-            BlockBuilder::read_little_endian(&self.block.data[key_start..key_start + 2]) as usize;
+        let key_start = self.block.offsets[idx] as usize;
+        let key_len = (&self.block.data[key_start..key_start + 2]).get_u16() as usize;
         let key = KeyVec::from_vec(Vec::from(
             &self.block.data[key_start + 2..key_start + 2 + key_len],
         ));
         let value_start = key_start + 2 + key_len;
-        let value_len =
-            BlockBuilder::read_little_endian(&self.block.data[value_start..value_start + 2])
-                as usize;
+        let value_len = (&self.block.data[value_start..value_start + 2]).get_u16() as usize;
 
         self.key = key;
         self.value_range = (value_start + 2, value_start + 2 + value_len);
+        self.idx = idx;
+    }
+
+    /// Move to the next key in the block.
+    pub fn next(&mut self) {
+        self.seek_to(self.idx + 1);
     }
 
     /// Seek to the first key that >= `key`.
     /// Note: You should assume the key-value pairs in the block are sorted when being added by
     /// callers.
     pub fn seek_to_key(&mut self, key: KeySlice) {
-        for n in 0..self.block.offsets.len() {
-            let key_start = self.block.offsets[n] as usize;
-            let key_len =
-                BlockBuilder::read_little_endian(&self.block.data[key_start..key_start + 2])
-                    as usize;
-            let t_key = KeyVec::from_vec(Vec::from(
-                &self.block.data[key_start + 2..key_start + 2 + key_len],
-            ));
+        let mut low = 0;
+        let mut high = self.block.offsets.len();
 
-            if t_key.as_key_slice() >= key {
-                let value_start = key_start + 2 + key_len;
-                let value_len = BlockBuilder::read_little_endian(
-                    &self.block.data[value_start..value_start + 2],
-                ) as usize;
-                self.key = t_key;
-                self.idx = n;
-                self.value_range = (value_start + 2, value_start + 2 + value_len);
-                return;
+        while low < high {
+            let mid = low + (high - low) / 2;
+            self.seek_to(mid);
+            match self.key().cmp(&key) {
+                Ordering::Less => low = mid + 1,
+                Ordering::Equal => return,
+                Ordering::Greater => high = mid,
             }
         }
-
-        self.key = KeyVec::new();
-        self.value_range = (0, 0);
+        self.seek_to(low);
     }
 }
