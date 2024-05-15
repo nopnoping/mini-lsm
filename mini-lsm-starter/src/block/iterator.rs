@@ -3,12 +3,11 @@
 
 use bytes::Buf;
 use std::cmp::Ordering;
-use std::ptr::read;
 use std::sync::Arc;
 
 use crate::key::{KeySlice, KeyVec};
 
-use super::{Block, BlockBuilder};
+use super::Block;
 
 /// Iterates on a block.
 pub struct BlockIterator {
@@ -63,7 +62,7 @@ impl BlockIterator {
     /// Returns true if the iterator is valid.
     /// Note: You may want to make use of `key`
     pub fn is_valid(&self) -> bool {
-        self.key.is_empty()
+        !self.key.is_empty()
     }
 
     /// Seeks to the first key in the block.
