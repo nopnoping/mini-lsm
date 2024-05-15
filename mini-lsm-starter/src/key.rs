@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 
 use bytes::Bytes;
 
@@ -97,6 +97,12 @@ impl Key<Bytes> {
 
     pub fn for_testing_key_ref(&self) -> &[u8] {
         self.0.as_ref()
+    }
+}
+
+impl Display for Key<Bytes> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8(self.raw_ref().to_vec()).unwrap())
     }
 }
 
