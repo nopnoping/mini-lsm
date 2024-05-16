@@ -93,4 +93,8 @@ impl<
 
         Ok(())
     }
+
+    fn num_active_iterators(&self) -> usize {
+        self.itr.0.num_active_iterators() + self.itr.1.num_active_iterators()
+    }
 }

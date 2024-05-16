@@ -86,7 +86,7 @@ impl SsTableBuilder {
         BlockMeta::encode_block_meta(&self.meta, &mut self.data);
         self.data.put_u32(offset_start);
 
-        let fo = FileObject::create(path.as_ref(), self.data).unwrap();
+        let fo = FileObject::create(path.as_ref(), self.data)?;
 
         SsTable::open(id, block_cache, fo)
     }

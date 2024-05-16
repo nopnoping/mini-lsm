@@ -2,14 +2,11 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use anyhow::{bail, Result};
-use bytes::Bytes;
-use std::collections::Bound;
 
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::table::SsTableIterator;
 use crate::{
     iterators::{merge_iterator::MergeIterator, StorageIterator},
-    mem_table,
     mem_table::MemTableIterator,
 };
 
@@ -56,6 +53,10 @@ impl StorageIterator for LsmIterator {
             self.inner.next()?;
         }
         Ok(())
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.inner.num_active_iterators()
     }
 }
 
@@ -108,5 +109,9 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
             }
         }
         Ok(())
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.iter.num_active_iterators()
     }
 }

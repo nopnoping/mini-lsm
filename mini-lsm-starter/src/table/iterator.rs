@@ -69,7 +69,35 @@ impl SsTableIterator {
         Ok(())
     }
 
-    pub fn scan(table: Arc<SsTable>, _lower: Bound<&[u8]>, _high: Bound<&[u8]>) -> Result<Self> {
+    pub fn scan(table: Arc<SsTable>, _lower: Bound<&[u8]>, _high: Bound<&[u8]>) -> Option<Self> {
+        match _lower {
+            Bound::Included(b) => {
+                if b.cmp(table.last_key.raw_ref()).is_gt() {
+                    return None;
+                }
+            }
+            Bound::Excluded(b) => {
+                if b.cmp(table.last_key.raw_ref()).is_ge() {
+                    return None;
+                }
+            }
+            Unbounded => {}
+        }
+
+        match _high {
+            Bound::Included(b) => {
+                if b.cmp(table.first_key.raw_ref()).is_lt() {
+                    return None;
+                }
+            }
+            Bound::Excluded(b) => {
+                if b.cmp(table.first_key.raw_ref()).is_le() {
+                    return None;
+                }
+            }
+            Unbounded => {}
+        }
+
         let mut itr = SsTableIterator {
             blk_iter: BlockIterator::create_and_seek_to_first(table.read_block_cached(0).unwrap()),
             blk_idx: 0,
@@ -79,17 +107,17 @@ impl SsTableIterator {
             valid: true,
         };
         match _lower {
-            Bound::Included(b) => itr.seek_to_key(KeySlice::from_slice(b))?,
+            Bound::Included(b) => itr.seek_to_key(KeySlice::from_slice(b)).unwrap(),
             Bound::Excluded(b) => {
-                itr.seek_to_key(KeySlice::from_slice(b))?;
+                itr.seek_to_key(KeySlice::from_slice(b)).unwrap();
                 if itr.key().raw_ref().cmp(b).is_eq() {
-                    itr.next()?;
+                    itr.next().unwrap();
                 }
             }
-            Unbounded => itr.seek_to_first()?,
+            Unbounded => itr.seek_to_first().unwrap(),
         };
         itr.check_end();
-        Ok(itr)
+        Some(itr)
     }
 
     pub fn check_end(&mut self) {
@@ -116,10 +144,6 @@ impl StorageIterator for SsTableIterator {
 
     /// Return the `key` that's held by the underlying block iterator.
     fn key(&self) -> KeySlice {
-        println!(
-            "{}",
-            String::from_utf8(self.blk_iter.key().raw_ref().to_vec()).unwrap()
-        );
         self.blk_iter.key()
     }
 
