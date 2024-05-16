@@ -16,11 +16,14 @@ use crate::compact::{
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
 use crate::iterators::merge_iterator::MergeIterator;
+use crate::iterators::two_merge_iterator::TwoMergeIterator;
+use crate::iterators::StorageIterator;
+use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
 use crate::mvcc::LsmMvccInner;
-use crate::table::SsTable;
+use crate::table::{SsTable, SsTableIterator};
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -280,13 +283,30 @@ impl LsmStorageInner {
 
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
     pub fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
-        let state_read = self.state.read();
+        let snapshot = {
+            let state = self.state.read();
+            state.clone()
+        };
 
-        let mut r = state_read.memtable.get(_key);
+        // mem
+        let mut r = snapshot.memtable.get(_key);
         if r.is_none() {
-            for his in &state_read.imm_memtables {
+            for his in &snapshot.imm_memtables {
                 r = his.get(_key);
                 if r.is_some() {
+                    break;
+                }
+            }
+        }
+
+        // sst
+        if r.is_none() {
+            for sst_idx in &snapshot.l0_sstables {
+                let sst = snapshot.sstables.get(sst_idx).unwrap().clone();
+                let itr = SsTableIterator::create_and_seek_to_key(sst, KeySlice::from_slice(_key))
+                    .unwrap();
+                if itr.key().raw_ref().cmp(_key).is_eq() {
+                    r = Some(Bytes::copy_from_slice(itr.value()));
                     break;
                 }
             }
@@ -384,16 +404,29 @@ impl LsmStorageInner {
         _lower: Bound<&[u8]>,
         _upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
-        let mut vec = Vec::new();
-        let state = self.state.read();
+        let snapshot = {
+            let state = self.state.read();
+            state.clone()
+        };
 
-        vec.push(Box::new(state.memtable.scan(_lower, _upper)));
-        for imm in &state.imm_memtables {
+        // memtable
+        let mut vec = Vec::new();
+        vec.push(Box::new(snapshot.memtable.scan(_lower, _upper)));
+        for imm in &snapshot.imm_memtables {
             vec.push(Box::new(imm.scan(_lower, _upper)));
         }
+        let mem_itr = MergeIterator::create(vec);
 
-        Ok(FusedIterator::new(
-            LsmIterator::new(MergeIterator::create(vec)).unwrap(),
-        ))
+        // sst
+        let mut vec = Vec::new();
+        for sst_idx in &snapshot.l0_sstables {
+            let sst = snapshot.sstables.get(sst_idx).unwrap().clone();
+            vec.push(Box::new(SsTableIterator::scan(sst, _lower, _upper)?));
+        }
+        let sst_itr = MergeIterator::create(vec);
+
+        Ok(FusedIterator::new(LsmIterator::new(
+            TwoMergeIterator::create(mem_itr, sst_itr)?,
+        )?))
     }
 }
