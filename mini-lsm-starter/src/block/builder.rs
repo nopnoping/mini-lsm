@@ -33,7 +33,7 @@ impl BlockBuilder {
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
         if self.first_key.is_empty() {
-            self.add_kv(&key, value);
+            self.add_kv(key, value);
             self.first_key.set_from_slice(key);
             return true;
         }
@@ -43,15 +43,30 @@ impl BlockBuilder {
             return false;
         }
 
-        self.add_kv(&key, value);
+        self.add_kv(key, value);
         true
     }
-    fn add_kv(&mut self, key: &KeySlice, value: &[u8]) {
+    fn add_kv(&mut self, key: KeySlice, value: &[u8]) {
         self.offsets.push(self.data.len() as u16);
-        self.data.put_u16(key.len() as u16);
-        self.data.put(key.raw_ref());
+
+        let overlap = self.key_overlap_len(key);
+        self.data.put_u16(overlap);
+        self.data.put_u16(key.len() as u16 - overlap);
+        self.data.put(&key.raw_ref()[overlap as usize..]);
+        // self.data.put_u16(key.len() as u16);
+        // self.data.put(key.raw_ref());
         self.data.put_u16(value.len() as u16);
         self.data.put(value);
+    }
+    fn key_overlap_len(&mut self, key: KeySlice) -> u16 {
+        let mut i = 0;
+        while i < self.first_key.len() && i < key.len() {
+            if self.first_key.raw_ref()[i] != key.raw_ref()[i] {
+                break;
+            }
+            i += 1;
+        }
+        i as u16
     }
 
     /// Check if there is no key-value pair in the block.

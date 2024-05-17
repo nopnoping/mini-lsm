@@ -79,14 +79,15 @@ impl BlockIterator {
         }
 
         let key_start = self.block.offsets[idx] as usize;
-        let key_len = (&self.block.data[key_start..key_start + 2]).get_u16() as usize;
-        let key = KeyVec::from_vec(Vec::from(
-            &self.block.data[key_start + 2..key_start + 2 + key_len],
-        ));
-        let value_start = key_start + 2 + key_len;
-        let value_len = (&self.block.data[value_start..value_start + 2]).get_u16() as usize;
+        let overlap = (&self.block.data[key_start..key_start + 2]).get_u16() as usize;
+        let key_len = (&self.block.data[key_start + 2..key_start + 4]).get_u16() as usize;
+        self.key.clear();
+        self.key.append(&self.first_key.raw_ref()[..overlap]);
+        self.key
+            .append(&self.block.data[key_start + 4..key_start + 4 + key_len]);
 
-        self.key = key;
+        let value_start = key_start + 4 + key_len;
+        let value_len = (&self.block.data[value_start..value_start + 2]).get_u16() as usize;
         self.value_range = (value_start + 2, value_start + 2 + value_len);
         self.idx = idx;
     }
