@@ -70,32 +70,8 @@ impl SsTableIterator {
     }
 
     pub fn scan(table: Arc<SsTable>, _lower: Bound<&[u8]>, _high: Bound<&[u8]>) -> Option<Self> {
-        match _lower {
-            Bound::Included(b) => {
-                if b.cmp(table.last_key.raw_ref()).is_gt() {
-                    return None;
-                }
-            }
-            Bound::Excluded(b) => {
-                if b.cmp(table.last_key.raw_ref()).is_ge() {
-                    return None;
-                }
-            }
-            Unbounded => {}
-        }
-
-        match _high {
-            Bound::Included(b) => {
-                if b.cmp(table.first_key.raw_ref()).is_lt() {
-                    return None;
-                }
-            }
-            Bound::Excluded(b) => {
-                if b.cmp(table.first_key.raw_ref()).is_le() {
-                    return None;
-                }
-            }
-            Unbounded => {}
+        if !table.range_overlap(_lower, _high) {
+            return None;
         }
 
         let mut itr = SsTableIterator {
