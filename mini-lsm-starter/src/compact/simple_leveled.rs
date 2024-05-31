@@ -35,7 +35,33 @@ impl SimpleLeveledCompactionController {
         &self,
         _snapshot: &LsmStorageState,
     ) -> Option<SimpleLeveledCompactionTask> {
-        unimplemented!()
+        // l0
+        if _snapshot.l0_sstables.len() >= self.options.level0_file_num_compaction_trigger {
+            return Some(SimpleLeveledCompactionTask {
+                upper_level: None,
+                upper_level_sst_ids: _snapshot.l0_sstables.clone(),
+                lower_level: 1,
+                lower_level_sst_ids: _snapshot.levels[0].1.clone(),
+                is_lower_level_bottom_level: false,
+            });
+        }
+
+        // l1-lmax
+        for level in 1..self.options.max_levels {
+            let ratio = (_snapshot.levels[level].1.len() as f64)
+                / (_snapshot.levels[level - 1].1.len() as f64);
+            if ratio < self.options.size_ratio_percent as f64 / 100.0 {
+                return Some(SimpleLeveledCompactionTask {
+                    upper_level: Some(level),
+                    upper_level_sst_ids: _snapshot.levels[level - 1].1.clone(),
+                    lower_level: level + 1,
+                    lower_level_sst_ids: _snapshot.levels[level].1.clone(),
+                    is_lower_level_bottom_level: level + 1 == self.options.max_levels,
+                });
+            }
+        }
+
+        None
     }
 
     /// Apply the compaction result.
@@ -51,6 +77,22 @@ impl SimpleLeveledCompactionController {
         _task: &SimpleLeveledCompactionTask,
         _output: &[usize],
     ) -> (LsmStorageState, Vec<usize>) {
-        unimplemented!()
+        let mut snapshot = _snapshot.clone();
+        let mut to_remove = Vec::new();
+
+        if let Some(upper) = _task.upper_level {
+            to_remove.extend(&snapshot.levels[upper - 1].1);
+            snapshot.levels[upper - 1].1.clear();
+        } else {
+            to_remove.extend(&_task.upper_level_sst_ids);
+            for _ in 0.._task.upper_level_sst_ids.len() {
+                snapshot.l0_sstables.pop();
+            }
+        }
+
+        to_remove.extend(&snapshot.levels[_task.lower_level - 1].1);
+        snapshot.levels[_task.lower_level - 1].1 = _output.to_vec();
+
+        (snapshot, to_remove)
     }
 }
