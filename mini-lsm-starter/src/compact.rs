@@ -21,6 +21,7 @@ pub use simple_leveled::{
 pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask};
 
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
+use crate::manifest::ManifestRecord;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -253,10 +254,11 @@ impl LsmStorageInner {
             l1_sstables: l1.clone(),
         };
         let new_sst = self.compact(&task)?;
+        let ids: Vec<usize> = new_sst.iter().map(|sst| sst.sst_id()).collect();
 
+        let _lock = self.state_lock.lock();
         {
             // update state
-            let _lock = self.state_lock.lock();
             let mut state = self.state.write();
             let mut new_state = state.as_ref().clone();
 
@@ -265,8 +267,7 @@ impl LsmStorageInner {
                 new_state.sstables.insert(sst.sst_id(), sst.clone());
             });
 
-            let new_sst = new_sst.iter().map(|sst| sst.sst_id()).collect();
-            new_state.levels[0] = (1, new_sst);
+            new_state.levels[0] = (1, ids.clone());
             for _ in 0..l0.len() {
                 new_state.l0_sstables.pop();
             }
@@ -280,12 +281,18 @@ impl LsmStorageInner {
 
             *state = Arc::new(new_state);
         }
+        self.sync_dir()?;
+        self.manifest
+            .as_ref()
+            .unwrap()
+            .add_record(&_lock, ManifestRecord::Compaction(task, ids.clone()))?;
 
         // remove file
         l0.iter()
             .try_for_each(|id| std::fs::remove_file(self.path_of_sst(*id)))?;
         l1.iter()
             .try_for_each(|id| std::fs::remove_file(self.path_of_sst(*id)))?;
+        self.sync_dir()?;
 
         Ok(())
     }
@@ -304,26 +311,38 @@ impl LsmStorageInner {
             return Ok(());
         }
         let task = task.unwrap();
+
         // compact
         let r = self.compact(&task)?;
         let ids: Vec<usize> = r.iter().map(|sst| sst.sst_id()).collect();
+
         // apply result
-        let mut state = self.state.write();
-        let (mut new_snapshot, to_remove) = self
-            .compaction_controller
-            .apply_compaction_result(&state, &task, &ids);
-        // hashmap
-        to_remove.iter().for_each(|id| {
-            new_snapshot.sstables.remove(id);
-        });
-        r.iter().for_each(|sst| {
-            new_snapshot.sstables.insert(sst.sst_id(), sst.clone());
-        });
-        *state = Arc::new(new_snapshot);
+        let lock = self.state_lock.lock();
+        let to_remove = {
+            let mut state = self.state.write();
+            let (mut new_snapshot, to_remove) = self
+                .compaction_controller
+                .apply_compaction_result(&state, &task, &ids);
+            // hashmap
+            to_remove.iter().for_each(|id| {
+                new_snapshot.sstables.remove(id);
+            });
+            r.iter().for_each(|sst| {
+                new_snapshot.sstables.insert(sst.sst_id(), sst.clone());
+            });
+            *state = Arc::new(new_snapshot);
+            to_remove
+        };
+        self.sync_dir()?;
+        self.manifest
+            .as_ref()
+            .unwrap()
+            .add_record(&lock, ManifestRecord::Compaction(task, ids.clone()))?;
         // file
         to_remove
             .iter()
             .try_for_each(|id| std::fs::remove_file(self.path_of_sst(*id)))?;
+        self.sync_dir()?;
 
         Ok(())
     }
