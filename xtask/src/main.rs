@@ -55,7 +55,7 @@ fn switch_to_starter_root() -> Result<()> {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .ok_or_else(|| anyhow!("failed to find the workspace root"))?
-            .join("mini-lsm-starter"),
+            .join("mini-lsm"),
     )?;
     Ok(())
 }
@@ -136,7 +136,7 @@ fn copy_test_case(test: CopyTestAction) -> Result<()> {
     } else {
         "mini-lsm/src/tests"
     };
-    let target_dir = "mini-lsm-starter/src/tests";
+    let target_dir = "mini-lsm/src/tests";
     if !Path::new(target_dir).exists() {
         std::fs::create_dir(target_dir)?;
     }
